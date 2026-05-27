@@ -84,10 +84,11 @@ class Query {
         try {
           const data = await getData(term);
           this.cache.set(term, data);
-          this.#pendingRequests.delete(term);
         } catch (error) {
           console.error(error);
         }
+        // clear both successful and failed requests
+        this.#pendingRequests.delete(term);
       }),
     );
   }
