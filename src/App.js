@@ -9,7 +9,6 @@ const getPartsFromMatches = (input, terms) => {
       ranges.push([matchIndex, matchIndex + term.length]);
     }
   }
-  // render highlighted parts
   ranges.sort(([a], [b]) => a - b);
   const parts = [];
   let prevPartEnd = 0;
@@ -21,7 +20,7 @@ const getPartsFromMatches = (input, terms) => {
     parts.push(input.slice(start, end));
     prevPartEnd = end;
   }
-  // last non lighlighted part
+  // last non highlighted part
   parts.push(input.slice(prevPartEnd));
   return parts;
 };
