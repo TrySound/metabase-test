@@ -1,0 +1,66 @@
+:root {
+  --bg-primary-color: #faedda;
+  --border-color: #dcafb5;
+  --text-color: #411b33;
+  --bg-highlight-color: #fee4c4;
+  --bg-button-color: #eddbd6;
+  --radius: 2px;
+}
+
+body {
+  margin: 12px;
+  font-family: system-ui, sans-serif;
+  background-color: var(--bg-primary-color);
+  color: var(--text-color);
+}
+
+form {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr max-content;
+  max-width: 280px;
+  margin-bottom: 32px;
+}
+
+input {
+  background-color: inherit;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  color: inherit;
+  padding: 6px;
+  font: inherit;
+}
+
+button {
+  background-color: var(--bg-button-color);
+  border-radius: var(--radius);
+  border: 1px solid;
+  color: inherit;
+  padding: 6px;
+  font: inherit;
+}
+
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 14px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 4px 10px;
+  border-right: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  &:first-child {
+    padding-left: 0;
+  }
+  &:last-child {
+    padding-right: 0;
+    border-right: 0;
+  }
+}
+
+th {
+  font-weight: normal;
+}
