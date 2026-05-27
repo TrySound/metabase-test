@@ -27,20 +27,15 @@ const getPartsFromMatches = (input, terms) => {
 
 function Row({ item, terms }) {
   let name = item.name;
-  const parts = getPartsFromMatches(name, terms);
   // render highlighted parts
-  if (parts.length > 0) {
-    name = (
-      <>
+  const parts = getPartsFromMatches(name, terms);
+  return (
+    <tr>
+      <td>
         {parts.map((part, index) =>
           index % 2 === 0 ? part : <strong key={index}>{part}</strong>,
         )}
-      </>
-    );
-  }
-  return (
-    <tr>
-      <td>{name}</td>
+      </td>
       <td>{item.phone}</td>
       <td>{item.address}</td>
     </tr>
