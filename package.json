@@ -1,0 +1,35 @@
+{
+  "name": "filter-interview-problem",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "concurrently --kill-others -p name -n 'server,client' -c 'blue,green' 'npm run server' 'npm run client'",
+    "client": "react-scripts start",
+    "server": "node server.js"
+  },
+  "proxy": "http://localhost:8080",
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "react-scripts": "^5.0.1"
+  }
+}
