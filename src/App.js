@@ -146,6 +146,32 @@ const useQuery = ({
   };
 };
 
+function Row({ item, term }) {
+  const termStart = item.name.toLowerCase().indexOf(term.toLowerCase());
+  let name = item.name;
+  // render highlighted parts
+  if (termStart > -1) {
+    const termEnd = termStart + term.length;
+    const prefix = item.name.slice(0, termStart);
+    const highlighted = item.name.slice(termStart, termEnd);
+    const suffix = item.name.slice(termEnd);
+    name = (
+      <>
+        {prefix}
+        <strong>{highlighted}</strong>
+        {suffix}
+      </>
+    );
+  }
+  return (
+    <tr>
+      <td>{name}</td>
+      <td>{item.phone}</td>
+      <td>{item.address}</td>
+    </tr>
+  );
+}
+
 export default function App() {
   const [term, setTerm] = useState("");
   // load initial data and limit it when search
@@ -182,11 +208,7 @@ export default function App() {
         </thead>
         <tbody>
           {data.map((item, index) => (
-            <tr key={index}>
-              <td>{item.name}</td>
-              <td>{item.phone}</td>
-              <td>{item.address}</td>
-            </tr>
+            <Row key={index} item={item} term={term} />
           ))}
         </tbody>
       </table>
