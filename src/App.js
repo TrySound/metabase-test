@@ -2,14 +2,30 @@ import { useState, useMemo } from "react";
 import { useQuery } from "./query";
 
 const getPartsFromMatches = (input, terms) => {
-  const ranges = [];
+  const matchedRanges = [];
   for (const term of terms) {
     const matchIndex = input.toLowerCase().indexOf(term.toLowerCase());
     if (matchIndex > -1) {
-      ranges.push([matchIndex, matchIndex + term.length]);
+      matchedRanges.push([matchIndex, matchIndex + term.length]);
     }
   }
-  ranges.sort(([a], [b]) => a - b);
+  // merge ranges
+  const ranges = [];
+  for (let index = 0; index < input.length; index += 1) {
+    const isHighlighted = matchedRanges.some(
+      ([start, end]) => start <= index && index <= end,
+    );
+    if (!isHighlighted) {
+      continue;
+    }
+    let lastRange = ranges.at(-1);
+    if (!lastRange || lastRange[1] + 1 !== index) {
+      lastRange = [index, index];
+      ranges.push(lastRange);
+    }
+    lastRange[1] = index;
+  }
+  // compute string parts
   const parts = [];
   let prevPartEnd = 0;
   for (let index = 0; index < ranges.length; index += 1) {
