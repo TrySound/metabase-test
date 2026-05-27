@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 
 const getData = async (searchTerm) => {
   const response = await fetch(`/search?term=${searchTerm}`);
@@ -21,35 +21,84 @@ class Cache {
   get(key) {
     const entry = this.#cache.get(key);
     // cleanup the entry when stored longer then "expireAfter"
-    if (entry && entry.time + this.#expireAfter >= Date.now()) {
+    const isExpired = (entry?.time ?? 0) + this.#expireAfter < Date.now();
+    if (entry && (entry.locked || !isExpired)) {
       return entry.data;
     } else {
       this.#cache.delete(key);
     }
   }
+  /**
+   * lock keys to not expire while other data is loaded
+   */
+  lock(key) {
+    const entry = this.#cache.get(key);
+    if (entry) {
+      this.#cache.set(key, { ...entry, locked: true });
+    }
+  }
+  /**
+   * reset expiry time to keep cache entry fresh
+   */
+  unlock(key) {
+    const entry = this.#cache.get(key);
+    if (entry) {
+      this.#cache.set(key, { ...entry, time: Date.now(), locked: false });
+    }
+  }
 }
 
+const sleep = (time) => {
+  return new Promise((resolve) => {
+    setTimeout(resolve, time);
+  });
+};
+
 class Query {
-  #cache;
+  cache;
   #debounceTimeoutId;
-  #pendingRequests = new Map();
   #requestDebounceTime;
   #loadingDelay;
+  #pendingRequests = new Map();
 
   constructor({ requestDebounceTime, loadingDelay, cacheExpireAfter }) {
     this.#requestDebounceTime = requestDebounceTime;
     this.#loadingDelay = loadingDelay;
-    this.#cache = new Cache({ expireAfter: cacheExpireAfter });
+    this.cache = new Cache({ expireAfter: cacheExpireAfter });
   }
 
-  fetch({ term, signal, onLoadingStart, onData }) {
+  #scheduleDataRequest(term) {
+    if (this.#pendingRequests.has(term)) {
+      return;
+    }
+    const lastPendingRequest = Promise.resolve(
+      Array.from(this.#pendingRequests.values()).at(-1),
+    );
+    // store requested promise to access later
+    // and update cache once request is completed
+    this.#pendingRequests.set(
+      term,
+      lastPendingRequest.then(async () => {
+        // schedule request 150ms after the latest one to mitigate server throttling
+        await sleep(150);
+        try {
+          const data = await getData(term);
+          this.cache.set(term, data);
+          this.#pendingRequests.delete(term);
+        } catch (error) {
+          console.error(error);
+        }
+      }),
+    );
+  }
+
+  fetch({ keys, signal, onLoadingStart, onData }) {
     // cancel latest debounced request
     this.cancel();
 
-    // show cached data immediately
-    const cachedData = this.#cache.get(term);
-    if (cachedData) {
-      onData(this.#cache.get(term));
+    // show cached data immediately when everything is present
+    if (keys.every((term) => this.cache.get(term))) {
+      onData();
       return;
     }
 
@@ -63,28 +112,29 @@ class Query {
         }
       }, this.#loadingDelay);
 
-      // store requested promise to access later
-      // and update cache once request is completed
-      if (!this.#pendingRequests.has(term)) {
-        this.#pendingRequests.set(
-          term,
-          getData(term)
-            .then((data) => {
-              this.#cache.set(term, data);
-              this.#pendingRequests.delete(term);
-            })
-            .catch((error) => console.error(error)),
-        );
+      for (const term of keys) {
+        // keep existing cache entries fresh while other data is loading
+        if (this.cache.get(term)) {
+          this.cache.lock(term);
+        } else {
+          this.#scheduleDataRequest(term);
+        }
       }
 
       // retrieve cached data after request is completed
       // and populated cache store
-      this.#pendingRequests.get(term)?.then(() => {
-        clearTimeout(loadingTimeoutId);
-        if (!signal.aborted) {
-          onData(this.#cache.get(term));
-        }
-      });
+      Promise.all(keys.map((term) => this.#pendingRequests.get(term))).then(
+        () => {
+          // reset existing cache entries lock
+          for (const term of keys) {
+            this.cache.unlock(term);
+          }
+          clearTimeout(loadingTimeoutId);
+          if (!signal.aborted) {
+            onData();
+          }
+        },
+      );
     }, this.#requestDebounceTime);
 
     signal?.addEventListener("abort", () => {
@@ -98,7 +148,7 @@ class Query {
 }
 
 const useQuery = ({
-  term,
+  keys,
   requestDebounceTime,
   cacheExpireAfter,
   loadingDelay,
@@ -118,20 +168,29 @@ const useQuery = ({
   useEffect(() => {
     const controller = new AbortController();
     query.current.fetch({
-      term,
+      keys,
       signal: controller.signal,
       onLoadingStart() {
         setIsLoading(true);
       },
-      onData(data) {
-        setData(data);
+      onData() {
+        const dataByName = new Map();
+        for (const term of keys) {
+          const data = query.current.cache.get(term);
+          if (data) {
+            for (const item of data) {
+              dataByName.set(item.name, item);
+            }
+          }
+        }
+        setData(Array.from(dataByName.values()));
         setIsLoading(false);
       },
     });
     return () => {
       controller.abort();
     };
-  }, [term]);
+  }, [keys]);
 
   // cleanup
   useEffect(() => {
@@ -146,20 +205,35 @@ const useQuery = ({
   };
 };
 
-function Row({ item, term }) {
-  const termStart = item.name.toLowerCase().indexOf(term.toLowerCase());
+function Row({ item, terms }) {
   let name = item.name;
+  const ranges = [];
+  for (const term of terms) {
+    const matchIndex = name.toLowerCase().indexOf(term.toLowerCase());
+    if (matchIndex > -1) {
+      ranges.push([matchIndex, matchIndex + term.length]);
+    }
+  }
+  if (ranges.length > 0) {
+    console.log(item.name, terms, ranges);
+  }
   // render highlighted parts
-  if (termStart > -1) {
-    const termEnd = termStart + term.length;
-    const prefix = item.name.slice(0, termStart);
-    const highlighted = item.name.slice(termStart, termEnd);
-    const suffix = item.name.slice(termEnd);
+  if (ranges.length > 0) {
+    ranges.sort(([a], [b]) => a - b);
+    const parts = [];
+    let prevPartEnd = 0;
+    for (let index = 0; index < ranges.length; index += 1) {
+      const [start, end] = ranges[index];
+      parts.push(name.slice(prevPartEnd, start));
+      parts.push(name.slice(start, end));
+      prevPartEnd = end;
+    }
+    parts.push(name.slice(prevPartEnd));
     name = (
       <>
-        {prefix}
-        <strong>{highlighted}</strong>
-        {suffix}
+        {parts.map((part, index) =>
+          index % 2 === 0 ? part : <strong key={index}>{part}</strong>,
+        )}
       </>
     );
   }
@@ -174,9 +248,14 @@ function Row({ item, term }) {
 
 export default function App() {
   const [term, setTerm] = useState("");
+  const queryKeys = useMemo(() => {
+    const terms = term.split(/\s+/).filter((term) => term);
+    return terms.length ? terms : [""];
+  }, [term]);
+
   // load initial data and limit it when search
-  const { data = [], isLoading } = useQuery({
-    term,
+  const { data, isLoading } = useQuery({
+    keys: queryKeys,
     requestDebounceTime: 300,
     cacheExpireAfter: 5 * 1000,
     loadingDelay: 500,
@@ -208,7 +287,7 @@ export default function App() {
         </thead>
         <tbody>
           {data.map((item, index) => (
-            <Row key={index} item={item} term={term} />
+            <Row key={index} item={item} terms={queryKeys} />
           ))}
         </tbody>
       </table>
