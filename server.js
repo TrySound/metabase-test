@@ -18,9 +18,11 @@ let lastTimestamp = Date.now();
 app.get('/search', function (req, res) {
     const now = Date.now();
     const elapsed = now - lastTimestamp;
-    lastTimestamp = now;
+    // allow requests once in 100ms instead of debouncing
     if (elapsed < 100) {
         return res.sendStatus(429);
+    } else {
+        lastTimestamp = now;
     }
 
     const { term } = req.query;

@@ -29,63 +29,116 @@ class Cache {
   }
 }
 
-const useQuery = ({ term, cacheExpireAfter, loadingDelay }) => {
-  const [data, setData] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
+class Query {
+  #cache;
+  #debounceTimeoutId;
+  #pendingRequests = new Map();
+  #requestDebounceTime;
+  #loadingDelay;
 
-  const cache = useRef();
-  if (!cache.current) {
-    cache.current = new Cache({ expireAfter: cacheExpireAfter });
+  constructor({ requestDebounceTime, loadingDelay, cacheExpireAfter }) {
+    this.#requestDebounceTime = requestDebounceTime;
+    this.#loadingDelay = loadingDelay;
+    this.#cache = new Cache({ expireAfter: cacheExpireAfter });
   }
 
-  const pending = useRef();
-  if (!pending.current) {
-    pending.current = new Map();
-  }
+  fetch({ term, signal, onLoadingStart, onData }) {
+    // cancel latest debounced request
+    this.cancel();
 
-  useEffect(() => {
     // show cached data immediately
-    const cachedData = cache.current.get(term);
+    const cachedData = this.#cache.get(term);
     if (cachedData) {
-      setData(cachedData);
+      onData(this.#cache.get(term));
       return;
     }
 
-    // store requested promise to access later
-    // and update cache once request is completed
-    if (!pending.current.has(term)) {
-      pending.current.set(
-        term,
-        getData(term)
-          .then((data) => {
-            cache.current.set(term, data);
-            pending.current.delete(term);
-          })
-          .catch((error) => console.error(error)),
-      );
-    }
+    let loadingTimeoutId;
+    // debounce request
+    this.#debounceTimeoutId = setTimeout(() => {
+      // schedule showing loading state
+      loadingTimeoutId = setTimeout(() => {
+        if (!signal.aborted) {
+          onLoadingStart();
+        }
+      }, this.#loadingDelay);
 
+      // store requested promise to access later
+      // and update cache once request is completed
+      if (!this.#pendingRequests.has(term)) {
+        this.#pendingRequests.set(
+          term,
+          getData(term)
+            .then((data) => {
+              this.#cache.set(term, data);
+              this.#pendingRequests.delete(term);
+            })
+            .catch((error) => console.error(error)),
+        );
+      }
+
+      // retrieve cached data after request is completed
+      // and populated cache store
+      this.#pendingRequests.get(term)?.then(() => {
+        clearTimeout(loadingTimeoutId);
+        if (!signal.aborted) {
+          onData(this.#cache.get(term));
+        }
+      });
+    }, this.#requestDebounceTime);
+
+    signal?.addEventListener("abort", () => {
+      clearTimeout(loadingTimeoutId);
+    });
+  }
+
+  cancel() {
+    clearTimeout(this.#debounceTimeoutId);
+  }
+}
+
+const useQuery = ({
+  term,
+  requestDebounceTime,
+  cacheExpireAfter,
+  loadingDelay,
+}) => {
+  const [data, setData] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const query = useRef();
+  if (!query.current) {
+    query.current = new Query({
+      requestDebounceTime,
+      cacheExpireAfter,
+      loadingDelay,
+    });
+  }
+
+  useEffect(() => {
     const controller = new AbortController();
-    // schedule showing loading state
-    const timeoutId = setTimeout(() => {
-      if (!controller.signal.aborted) {
+    query.current.fetch({
+      term,
+      signal: controller.signal,
+      onLoadingStart() {
         setIsLoading(true);
-      }
-    }, loadingDelay);
-    // retrieve cached data after request is completed
-    // and populated cache store
-    pending.current.get(term)?.then(() => {
-      clearTimeout(timeoutId);
-      if (!controller.signal.aborted) {
-        setData(cache.current.get(term));
+      },
+      onData(data) {
+        setData(data);
         setIsLoading(false);
-      }
+      },
     });
     return () => {
       controller.abort();
-      clearTimeout(timeoutId);
     };
-  }, [term, loadingDelay]);
+  }, [term]);
+
+  // cleanup
+  useEffect(() => {
+    return () => {
+      query.current.cancel();
+    };
+  }, []);
 
   return {
     data,
@@ -95,16 +148,15 @@ const useQuery = ({ term, cacheExpireAfter, loadingDelay }) => {
 
 export default function App() {
   const [term, setTerm] = useState("");
-  const [requestedTerm, setRequestedTerm] = useState("");
   // load initial data and limit it when search
   const { data = [], isLoading } = useQuery({
-    term: requestedTerm,
+    term,
+    requestDebounceTime: 300,
     cacheExpireAfter: 5 * 1000,
     loadingDelay: 500,
   });
   const handleSubmit = (event) => {
     event.preventDefault();
-    setRequestedTerm(term);
   };
   return (
     <>
@@ -115,10 +167,10 @@ export default function App() {
           value={term}
           onChange={(event) => setTerm(event.target.value)}
         />
-        <button>
-          Search
-          {isLoading && <div className="spinner"></div>}
-        </button>
+        <div
+          className="spinner"
+          style={{ visibility: isLoading ? "visible" : "hidden" }}
+        ></div>
       </form>
       <table hidden={data.length === 0}>
         <thead>
