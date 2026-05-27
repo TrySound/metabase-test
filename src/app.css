@@ -16,8 +16,9 @@ body {
 
 form {
   display: grid;
+  grid-template-columns: 1fr max-content max-content;
+  align-items: center;
   gap: 4px;
-  grid-template-columns: 1fr max-content;
   max-width: 280px;
   margin-bottom: 32px;
 }
@@ -63,4 +64,33 @@ td {
 
 th {
   font-weight: normal;
+}
+
+.spinner::after {
+  content: '';
+  display: block;
+  width: 16px;
+  height: 16px;
+  border: 3px solid var(--border-color);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+button {
+  position: relative;
+  .spinner {
+    position: absolute;
+    inset: 0;
+    background-color: var(--bg-button-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

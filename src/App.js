@@ -29,8 +29,9 @@ class Cache {
   }
 }
 
-const useQuery = ({ term, cacheExpireAfter }) => {
+const useQuery = ({ term, cacheExpireAfter, loadingDelay }) => {
   const [data, setData] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   const cache = useRef();
   if (!cache.current) {
@@ -57,7 +58,6 @@ const useQuery = ({ term, cacheExpireAfter }) => {
         term,
         getData(term)
           .then((data) => {
-            console.log(data);
             cache.current.set(term, data);
             pending.current.delete(term);
           })
@@ -65,19 +65,31 @@ const useQuery = ({ term, cacheExpireAfter }) => {
       );
     }
 
+    const controller = new AbortController();
+    // schedule showing loading state
+    const timeoutId = setTimeout(() => {
+      if (!controller.signal.aborted) {
+        setIsLoading(true);
+      }
+    }, loadingDelay);
     // retrieve cached data after request is completed
     // and populated cache store
-    const controller = new AbortController();
     pending.current.get(term)?.then(() => {
+      clearTimeout(timeoutId);
       if (!controller.signal.aborted) {
         setData(cache.current.get(term));
+        setIsLoading(false);
       }
     });
-    return () => controller.abort();
-  }, [term]);
+    return () => {
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [term, loadingDelay]);
 
   return {
     data,
+    isLoading,
   };
 };
 
@@ -85,9 +97,10 @@ export default function App() {
   const [term, setTerm] = useState("");
   const [requestedTerm, setRequestedTerm] = useState("");
   // load initial data and limit it when search
-  const { data = [] } = useQuery({
+  const { data = [], isLoading } = useQuery({
     term: requestedTerm,
     cacheExpireAfter: 5 * 1000,
+    loadingDelay: 500,
   });
   const handleSubmit = (event) => {
     event.preventDefault();
@@ -102,7 +115,10 @@ export default function App() {
           value={term}
           onChange={(event) => setTerm(event.target.value)}
         />
-        <button>Search</button>
+        <button>
+          Search
+          {isLoading && <div className="spinner"></div>}
+        </button>
       </form>
       <table hidden={data.length === 0}>
         <thead>
