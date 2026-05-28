@@ -54,6 +54,27 @@ const sleep = (time) => {
   });
 };
 
+const retry = async (fn) => {
+  let lastError;
+  try {
+    await fn();
+  } catch {
+    for (const time of [1000, 2000, 4000]) {
+      lastError = undefined;
+      await sleep(time);
+      try {
+        await fn();
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
+};
+
 class Query {
   cache;
   #debounceTimeoutId;
@@ -82,8 +103,11 @@ class Query {
         // schedule request 150ms after the latest one to mitigate server throttling
         await sleep(150);
         try {
-          const data = await getData(term);
-          this.cache.set(term, data);
+          // retry 3 times with increasing delay until completed
+          await retry(async () => {
+            const data = await getData(term);
+            this.cache.set(term, data);
+          });
         } catch (error) {
           console.error(error);
         }
