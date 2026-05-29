@@ -9,27 +9,22 @@ const getPartsFromMatches = (input, terms) => {
       matchedRanges.push([matchIndex, matchIndex + term.length]);
     }
   }
+  // sort by start to guarantee intersection detection with last range
+  matchedRanges.sort((a, b) => a[0] - b[0]);
   // merge ranges
   const ranges = [];
-  for (let index = 0; index < input.length; index += 1) {
-    const isHighlighted = matchedRanges.some(
-      ([start, end]) => start <= index && index <= end,
-    );
-    if (!isHighlighted) {
-      continue;
-    }
+  for (const [start, end] of matchedRanges) {
     let lastRange = ranges.at(-1);
-    if (!lastRange || lastRange[1] + 1 !== index) {
-      lastRange = [index, index];
-      ranges.push(lastRange);
+    if (lastRange && start <= lastRange[1]) {
+      lastRange[1] = Math.max(lastRange[1], end);
+    } else {
+      ranges.push([start, end]);
     }
-    lastRange[1] = index;
   }
   // compute string parts
   const parts = [];
   let prevPartEnd = 0;
-  for (let index = 0; index < ranges.length; index += 1) {
-    const [start, end] = ranges[index];
+  for (const [start, end] of ranges) {
     // previous non highlighted part
     parts.push(input.slice(prevPartEnd, start));
     // highlighted part
