@@ -48,9 +48,9 @@ class Cache {
   }
 }
 
-const sleep = (time) => {
+const sleep = (time, data) => {
   return new Promise((resolve) => {
-    setTimeout(resolve, time);
+    setTimeout(resolve, time, data);
   });
 };
 
@@ -127,16 +127,8 @@ class Query {
       return;
     }
 
-    let loadingTimeoutId;
     // debounce request
-    this.#debounceTimeoutId = setTimeout(() => {
-      // schedule showing loading state
-      loadingTimeoutId = setTimeout(() => {
-        if (!signal.aborted) {
-          onLoadingStart();
-        }
-      }, this.#loadingDelay);
-
+    this.#debounceTimeoutId = setTimeout(async () => {
       for (const term of keys) {
         // keep existing cache entries fresh while other data is loading
         if (this.cache.get(term)) {
@@ -148,23 +140,28 @@ class Query {
 
       // retrieve cached data after request is completed
       // and populated cache store
-      Promise.all(keys.map((term) => this.#pendingRequests.get(term))).then(
-        () => {
-          // reset existing cache entries lock
-          for (const term of keys) {
-            this.cache.unlock(term);
-          }
-          clearTimeout(loadingTimeoutId);
-          if (!signal.aborted) {
-            onData();
-          }
-        },
+      const finishedPromise = Promise.all(
+        keys.map((term) => this.#pendingRequests.get(term)),
       );
-    }, this.#requestDebounceTime);
 
-    signal?.addEventListener("abort", () => {
-      clearTimeout(loadingTimeoutId);
-    });
+      // fire loading start if requests are not finished within "loading delay"
+      const status = await Promise.race([
+        sleep(this.#loadingDelay, "loading"),
+        finishedPromise,
+      ]);
+      if (status === "loading") {
+        onLoadingStart();
+        await finishedPromise;
+      }
+
+      // reset existing cache entries lock
+      for (const term of keys) {
+        this.cache.unlock(term);
+      }
+      if (!signal.aborted) {
+        onData();
+      }
+    }, this.#requestDebounceTime);
   }
 
   cancel() {
