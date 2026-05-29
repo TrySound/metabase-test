@@ -80,7 +80,7 @@ class Query {
   #debounceTimeoutId;
   #requestDebounceTime;
   #loadingDelay;
-  #pendingRequests = new Map();
+  #pendingRequest;
 
   constructor({ requestDebounceTime, loadingDelay, cacheExpireAfter }) {
     this.#requestDebounceTime = requestDebounceTime;
@@ -88,33 +88,37 @@ class Query {
     this.cache = new Cache({ expireAfter: cacheExpireAfter });
   }
 
-  #scheduleDataRequest(term) {
-    if (this.#pendingRequests.has(term)) {
-      return;
+  async #fetchKeys({ keys, signal }) {
+    for (const term of keys) {
+      // optimize to avoid waiting the promise
+      if (this.cache.get(term)) {
+        continue;
+      }
+      if (signal.aborted) {
+        break;
+      }
+      // chain latest pending request with 150ms delay in between
+      // to mitigate server throttling
+      this.#pendingRequest = Promise.resolve(this.#pendingRequest).then(
+        async () => {
+          // skip if pending request loaded term data
+          if (this.cache.get(term)) {
+            return;
+          }
+          await sleep(150);
+          try {
+            // retry 3 times with increasing delay until completed
+            await retry(async () => {
+              const data = await getData(term);
+              this.cache.set(term, data);
+            });
+          } catch (error) {
+            console.error(error);
+          }
+        },
+      );
+      await this.#pendingRequest;
     }
-    const lastPendingRequest = Promise.resolve(
-      Array.from(this.#pendingRequests.values()).at(-1),
-    );
-    // store requested promise to access later
-    // and update cache once request is completed
-    this.#pendingRequests.set(
-      term,
-      lastPendingRequest.then(async () => {
-        // schedule request 150ms after the latest one to mitigate server throttling
-        await sleep(150);
-        try {
-          // retry 3 times with increasing delay until completed
-          await retry(async () => {
-            const data = await getData(term);
-            this.cache.set(term, data);
-          });
-        } catch (error) {
-          console.error(error);
-        }
-        // clear both successful and failed requests
-        this.#pendingRequests.delete(term);
-      }),
-    );
   }
 
   fetch({ keys, signal, onLoadingStart, onData }) {
@@ -129,38 +133,37 @@ class Query {
 
     // debounce request
     this.#debounceTimeoutId = setTimeout(async () => {
+      // prevent cache expiration until data is loaded
       for (const term of keys) {
-        // keep existing cache entries fresh while other data is loading
-        if (this.cache.get(term)) {
-          this.cache.lock(term);
-        } else {
-          this.#scheduleDataRequest(term);
-        }
+        this.cache.lock(term);
       }
-
-      // retrieve cached data after request is completed
-      // and populated cache store
-      const finishedPromise = Promise.all(
-        keys.map((term) => this.#pendingRequests.get(term)),
-      );
+      const dataPromise = this.#fetchKeys({ keys, signal });
 
       // fire loading start if requests are not finished within "loading delay"
       const status = await Promise.race([
         sleep(this.#loadingDelay, "loading"),
-        finishedPromise,
+        dataPromise,
       ]);
+      if (signal.aborted) {
+        // restart cache expiry when aborted
+        for (const term of keys) {
+          this.cache.unlock(term);
+        }
+        return;
+      }
       if (status === "loading") {
         onLoadingStart();
-        await finishedPromise;
+        await dataPromise;
       }
 
-      // reset existing cache entries lock
+      // restart cache expiry
       for (const term of keys) {
         this.cache.unlock(term);
       }
-      if (!signal.aborted) {
-        onData();
+      if (signal.aborted) {
+        return;
       }
+      onData();
     }, this.#requestDebounceTime);
   }
 
